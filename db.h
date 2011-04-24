@@ -450,6 +450,7 @@ public:
     void ListAccountCreditDebit(const string& strAccount, list<CAccountingEntry>& acentries);
 
     bool LoadWallet();
+    void TopUpKeyPool();
 protected:
     void ReserveKeyFromKeyPool(int64& nIndex, CKeyPool& keypool);
     void KeepKey(int64 nIndex);

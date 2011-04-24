@@ -948,16 +948,11 @@ void BackupWallet(const string& strDest)
     }
 }
 
-
-void CWalletDB::ReserveKeyFromKeyPool(int64& nIndex, CKeyPool& keypool)
-{
-    nIndex = -1;
-    keypool.vchPubKey.clear();
+void CWalletDB::TopUpKeyPool() {
     CRITICAL_BLOCK(cs_main)
     CRITICAL_BLOCK(cs_mapWallet)
     CRITICAL_BLOCK(cs_setKeyPool)
     {
-        // Top up key pool
         int64 nTargetSize = max(GetArg("-keypool", 100), (int64)0);
         while (setKeyPool.size() < nTargetSize+1)
         {
@@ -969,6 +964,20 @@ void CWalletDB::ReserveKeyFromKeyPool(int64& nIndex, CKeyPool& keypool)
             setKeyPool.insert(nEnd);
             printf("keypool added key %"PRI64d", size=%d\n", nEnd, setKeyPool.size());
         }
+    }
+}
+
+
+void CWalletDB::ReserveKeyFromKeyPool(int64& nIndex, CKeyPool& keypool)
+{
+    nIndex = -1;
+    keypool.vchPubKey.clear();
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_mapWallet)
+    CRITICAL_BLOCK(cs_setKeyPool)
+    {
+        // Top up key pool
+        TopUpKeyPool();
 
         // Get the oldest key
         assert(!setKeyPool.empty());

@@ -321,6 +321,9 @@ string GetAccountAddress(string strAccount, bool bForceNew=false)
     string strAddress;
 
     CWalletDB walletdb;
+    // top up key pool before starting an atomic operation;
+    // otherwise we will block on writing the new keys to the database
+    walletdb.TopUpKeyPool();
     walletdb.TxnBegin();
 
     CAccount account;
