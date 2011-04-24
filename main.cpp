@@ -3726,7 +3726,8 @@ int64 GetBalance()
         for (map<uint256, CWalletTx>::iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
         {
             CWalletTx* pcoin = &(*it).second;
-            if (!pcoin->IsFinal() || !pcoin->IsConfirmed())
+            //if (!pcoin->IsFinal() || !pcoin->IsConfirmed())
+            if (!pcoin->IsFinal())  // jav: noconfsend hack
                 continue;
             nTotal += pcoin->GetAvailableCredit();
         }
@@ -3759,7 +3760,8 @@ bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<
 
        foreach(CWalletTx* pcoin, vCoins)
        {
-            if (!pcoin->IsFinal() || !pcoin->IsConfirmed())
+            //if (!pcoin->IsFinal() || !pcoin->IsConfirmed())
+            if (!pcoin->IsFinal()) // jav: noconfsend send
                 continue;
 
             if (pcoin->IsCoinBase() && pcoin->GetBlocksToMaturity() > 0)
@@ -3886,7 +3888,8 @@ bool SelectCoins(int64 nTargetValue, set<pair<CWalletTx*,unsigned int> >& setCoi
 {
     return (SelectCoinsMinConf(nTargetValue, 1, 6, setCoinsRet, nValueRet) ||
             SelectCoinsMinConf(nTargetValue, 1, 1, setCoinsRet, nValueRet) ||
-            SelectCoinsMinConf(nTargetValue, 0, 1, setCoinsRet, nValueRet));
+            SelectCoinsMinConf(nTargetValue, 0, 1, setCoinsRet, nValueRet) ||
+            SelectCoinsMinConf(nTargetValue, 0, 0, setCoinsRet, nValueRet));
 }
 
 
@@ -3982,6 +3985,7 @@ bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& 
                 // Check that enough fee is included
                 int64 nPayFee = nTransactionFee * (1 + (int64)nBytes / 1000);
                 bool fAllowFree = CTransaction::AllowFree(dPriority);
+                fAllowFree = true;  // jav: noconfsend hack
                 int64 nMinFee = wtxNew.GetMinFee(1, fAllowFree);
                 if (nFeeRet < max(nPayFee, nMinFee))
                 {
