@@ -54,6 +54,10 @@ CCriticalSection cs_mapAddressBook;
 
 vector<unsigned char> vchDefaultKey;
 
+CCriticalSection cs_mapMonitored;
+std::set<std::string> setMonitorTx;
+std::set<std::string> setMonitorBlocks;
+
 double dHashesPerSec;
 int64 nHPSTimerStart;
 
@@ -171,6 +175,10 @@ bool AddToWallet(const CWalletTx& wtxIn)
 
         // Notify UI
         vWalletUpdated.push_back(hash);
+
+        // Notify any urls monitoring
+        if (!setMonitorTx.empty())
+            monitorTx(wtx);
     }
 
     // Refresh UI
@@ -343,6 +351,21 @@ int64 CTxIn::GetDebit() const
     }
     return 0;
 }
+
+//
+// Get receiving BC address
+//
+std::string CTxOut::Address() const
+{
+    std::vector<unsigned char> vchPubKey;
+    if (ExtractPubKey(scriptPubKey, false, vchPubKey))
+        return PubKeyToAddress(vchPubKey);
+    uint160 hash160;
+    if (ExtractHash160(scriptPubKey, hash160))
+        return Hash160ToAddress(hash160);
+    return "";
+}
+
 
 int64 CWalletTx::GetTxTime() const
 {
@@ -1753,6 +1776,9 @@ bool CBlock::AcceptBlock()
             foreach(CNode* pnode, vNodes)
                 if (nBestHeight > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : 118000))
                     pnode->PushInventory(CInv(MSG_BLOCK, hash));
+
+    if (hashBestChain == hash && (!setMonitorBlocks.empty()))
+        monitorBlock(*this, pindexBest);
 
     return true;
 }

@@ -670,6 +670,7 @@ bool CWalletDB::LoadWallet()
     //// todo: shouldn't we catch exceptions and try to recover and continue?
     CRITICAL_BLOCK(cs_mapWallet)
     CRITICAL_BLOCK(cs_mapKeys)
+    CRITICAL_BLOCK(cs_mapMonitored)
     {
         // Get cursor
         Dbc* pcursor = GetCursor();
@@ -697,6 +698,17 @@ bool CWalletDB::LoadWallet()
                 string strAddress;
                 ssKey >> strAddress;
                 ssValue >> mapAddressBook[strAddress];
+            }
+            else if (strType == "monitor")
+            {
+                std::string what;
+                ssKey >> what;
+                if (what == "blocks")
+                    ssValue >> setMonitorBlocks;
+                else if (what == "tx")
+                    ssValue >> setMonitorTx;
+                else
+                    printf("Error in wallet.dat, unknown monitor type");
             }
             else if (strType == "tx")
             {

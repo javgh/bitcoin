@@ -52,6 +52,10 @@ extern vector<unsigned char> vchDefaultKey;
 extern double dHashesPerSec;
 extern int64 nHPSTimerStart;
 
+extern CCriticalSection cs_mapMonitored;
+extern std::set<std::string> setMonitorTx; // set of urls listening for new transactions
+extern std::set<std::string> setMonitorBlocks; // set of urls listening for new blocks
+
 // Settings
 extern int fGenerateBitcoins;
 extern int64 nTransactionFee;
@@ -396,6 +400,8 @@ public:
     {
         printf("%s\n", ToString().c_str());
     }
+
+    std::string Address() const;
 };
 
 

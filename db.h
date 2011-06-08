@@ -449,6 +449,23 @@ public:
     int64 GetAccountCreditDebit(const string& strAccount);
     void ListAccountCreditDebit(const string& strAccount, list<CAccountingEntry>& acentries);
 
+    bool ReadMonitorURLs(const std::string& what, std::set<std::string>& urls)
+    {
+        return Read(make_pair(std::string("monitor"), what), urls);
+    }
+
+    bool WriteMonitorURLs(const std::string& what, const std::set<std::string>& urls)
+    {
+        nWalletDBUpdated++;
+        return Write(make_pair(std::string("monitor"), what), urls);
+    }
+
+    bool EraseMonitorURLs(const std::string& what)
+    {
+        nWalletDBUpdated++;
+        return Erase(make_pair(std::string("monitor"), what));
+    }
+
     bool LoadWallet();
     void TopUpKeyPool();
 protected:
