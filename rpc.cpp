@@ -281,6 +281,8 @@ Value getinfo(const Array& params, bool fHelp)
             "getinfo\n"
             "Returns an object containing various state info.");
 
+    CreateAccountAmountsCache(0);
+
     Object obj;
     obj.push_back(Pair("version",       (int)VERSION));
     obj.push_back(Pair("balance",       ValueFromAmount(GetBalance())));
@@ -358,6 +360,12 @@ string GetAccountAddress(string strAccount, bool bForceNew=false)
         string strAddress = PubKeyToAddress(account.vchPubKey);
         SetAddressBookName(strAddress, strAccount);
         walletdb.WriteAccount(strAccount, account);
+
+        // Update balance cache
+        CRITICAL_BLOCK(cs_mapAccountBalances)
+        {
+            mapAccountBalances[strAccount] = 0;
+        }
     }
 
     walletdb.TxnCommit();
@@ -637,7 +645,6 @@ int64 GetAccountBalance(const string& strAccount, int nMinDepth)
     return GetAccountBalance(walletdb, strAccount, nMinDepth);
 }
 
-
 Value getbalance(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 0 || params.size() > 2)
@@ -683,7 +690,28 @@ Value getbalance(const Array& params, bool fHelp)
 
     string strAccount = AccountFromValue(params[0]);
 
-    int64 nBalance = GetAccountBalance(strAccount, nMinDepth);
+    int64 nBalance;
+    CRITICAL_BLOCK(cs_mapAccountBalances)
+    {
+        map<string, int64>::iterator it = mapAccountBalances.find(strAccount);
+        if (nMinDepth == 0 && it != mapAccountBalances.end())
+        {
+            nBalance = (*it).second;
+
+            if (rand() % 65536 == 0) {
+                // double check cache
+                int64 nBalanceCheck = GetAccountBalance(strAccount, nMinDepth);
+                if (nBalance == nBalanceCheck)
+                    printf("Cache worked for %s\n", strAccount.c_str());
+                else
+                    printf("Warning: Cache did not work for %s (%d != %d)\n", strAccount.c_str(), nBalance, nBalanceCheck);
+                }
+            }
+        else
+        {
+            nBalance = GetAccountBalance(strAccount, nMinDepth);
+        }
+    }
 
     return ValueFromAmount(nBalance);
 }
