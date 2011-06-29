@@ -360,9 +360,10 @@ string GetAccountAddress(string strAccount, bool bForceNew=false)
         walletdb.WriteAccount(strAccount, account);
 
         // Update balance cache
-        CRITICAL_BLOCK(cs_mapAccountBalances)
+        CRITICAL_BLOCK(cs_mapAccountBalanceCache)
         {
-            mapAccountBalances[strAccount] = 0;
+            for (int nMinDepth = 0; nMinDepth <= ACCOUNT_BALANCE_CACHE_DEPTH; nMinDepth++)
+                mapAccountBalanceCache[make_pair(strAccount, nMinDepth)] = 0;
         }
     }
 
@@ -612,10 +613,10 @@ Value getreceivedbyaccount(const Array& params, bool fHelp)
 int64 GetAccountBalance(CWalletDB& walletdb, const string& strAccount, int nMinDepth, bool fUseCache = true)
 {
     // check the cache first
-    CRITICAL_BLOCK(cs_mapAccountBalances)
+    CRITICAL_BLOCK(cs_mapAccountBalanceCache)
     {
-        map<string, int64>::iterator it = mapAccountBalances.find(strAccount);
-        if (fUseCache && nMinDepth == 0 && it != mapAccountBalances.end())
+        map<pair<string, int>, int64>::iterator it = mapAccountBalanceCache.find(make_pair(strAccount, nMinDepth));
+        if (fUseCache && it != mapAccountBalanceCache.end())
             return (*it).second;
     }
 

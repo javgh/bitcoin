@@ -27,7 +27,7 @@ static const int fHaveUPnP = true;
 #else
 static const int fHaveUPnP = false;
 #endif
-
+static const int ACCOUNT_BALANCE_CACHE_DEPTH = 2;
 
 
 
@@ -56,8 +56,8 @@ extern CCriticalSection cs_mapMonitored;
 extern std::set<std::string> setMonitorTx; // set of urls listening for new transactions
 extern std::set<std::string> setMonitorBlocks; // set of urls listening for new blocks
 
-extern map<string, int64> mapAccountBalances;
-extern CCriticalSection cs_mapAccountBalances;
+extern map<pair<string, int>, int64> mapAccountBalanceCache;
+extern CCriticalSection cs_mapAccountBalanceCache;
 
 // Settings
 extern int fGenerateBitcoins;
@@ -106,7 +106,7 @@ void BitcoinMiner();
 bool CheckProofOfWork(uint256 hash, unsigned int nBits);
 bool IsInitialBlockDownload();
 string GetWarnings(string strFor);
-void CreateAccountAmountsCache(int nMinDepth);
+void CreateAccountBalanceCache();
 
 
 
@@ -1010,7 +1010,7 @@ public:
     void GetAccountAmounts(const string& strAccount, int64& nGenerated, int64& nReceived, 
                            int64& nSent, int64& nFee) const;
 
-    void UpdateAccountAmountsCache(int nMinDepth) const;
+    void UpdateAccountBalanceCache() const;
 
     bool IsFromMe() const
     {
