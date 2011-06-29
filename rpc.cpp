@@ -281,8 +281,6 @@ Value getinfo(const Array& params, bool fHelp)
             "getinfo\n"
             "Returns an object containing various state info.");
 
-    CreateAccountAmountsCache(0);
-
     Object obj;
     obj.push_back(Pair("version",       (int)VERSION));
     obj.push_back(Pair("balance",       ValueFromAmount(GetBalance())));
@@ -611,9 +609,17 @@ Value getreceivedbyaccount(const Array& params, bool fHelp)
     return (double)nAmount / (double)COIN;
 }
 
-
-int64 GetAccountBalance(CWalletDB& walletdb, const string& strAccount, int nMinDepth)
+int64 GetAccountBalance(CWalletDB& walletdb, const string& strAccount, int nMinDepth, bool fUseCache = true)
 {
+    // check the cache first
+    CRITICAL_BLOCK(cs_mapAccountBalances)
+    {
+        map<string, int64>::iterator it = mapAccountBalances.find(strAccount);
+        if (fUseCache && nMinDepth == 0 && it != mapAccountBalances.end())
+            return (*it).second;
+    }
+
+    // in case of cache miss: calculate from scratch
     int64 nBalance = 0;
     CRITICAL_BLOCK(cs_mapWallet)
     {
@@ -639,10 +645,10 @@ int64 GetAccountBalance(CWalletDB& walletdb, const string& strAccount, int nMinD
     return nBalance;
 }
 
-int64 GetAccountBalance(const string& strAccount, int nMinDepth)
+int64 GetAccountBalance(const string& strAccount, int nMinDepth, bool fUseCache = true)
 {
     CWalletDB walletdb;
-    return GetAccountBalance(walletdb, strAccount, nMinDepth);
+    return GetAccountBalance(walletdb, strAccount, nMinDepth, fUseCache);
 }
 
 Value getbalance(const Array& params, bool fHelp)
@@ -690,27 +696,15 @@ Value getbalance(const Array& params, bool fHelp)
 
     string strAccount = AccountFromValue(params[0]);
 
-    int64 nBalance;
-    CRITICAL_BLOCK(cs_mapAccountBalances)
-    {
-        map<string, int64>::iterator it = mapAccountBalances.find(strAccount);
-        if (nMinDepth == 0 && it != mapAccountBalances.end())
-        {
-            nBalance = (*it).second;
+    int64 nBalance= GetAccountBalance(strAccount, nMinDepth);
 
-            if (rand() % 65536 == 0) {
-                // double check cache
-                int64 nBalanceCheck = GetAccountBalance(strAccount, nMinDepth);
-                if (nBalance == nBalanceCheck)
-                    printf("Cache worked for %s\n", strAccount.c_str());
-                else
-                    printf("Warning: Cache did not work for %s (%d != %d)\n", strAccount.c_str(), nBalance, nBalanceCheck);
-                }
-            }
+    // double check cache
+    if (rand() % 4096 == 0) {
+        int64 nBalanceCheck = GetAccountBalance(strAccount, nMinDepth, false);
+        if (nBalance == nBalanceCheck)
+            printf("Cache worked for %s\n", strAccount.c_str());
         else
-        {
-            nBalance = GetAccountBalance(strAccount, nMinDepth);
-        }
+            printf("Warning: Cache did not work for %s (%d != %d)\n", strAccount.c_str(), nBalance, nBalanceCheck);
     }
 
     return ValueFromAmount(nBalance);

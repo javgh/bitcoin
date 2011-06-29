@@ -503,6 +503,9 @@ bool AppInit2(int argc, char* argv[])
 
     RandAddSeedPerfmon();
 
+    // build initial balance cache
+    CreateAccountAmountsCache(0);
+
     if (!CreateThread(StartNode, NULL))
         wxMessageBox("Error: CreateThread(StartNode) failed", "Bitcoin");
 
