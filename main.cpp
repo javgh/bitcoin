@@ -232,8 +232,11 @@ bool AddToWallet(const CWalletTx& wtxIn)
         if (!setMonitorTx.empty())
             monitorTx(wtx);
 
-        // Rebuild balance cache
-        CreateAccountBalanceCache();
+        // Adjust balance cache
+        CRITICAL_BLOCK(cs_mapAccountBalanceCache)
+        {
+            wtx.UpdateAccountBalanceCache();
+        }
     }
 
     // Refresh UI
