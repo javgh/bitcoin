@@ -574,10 +574,8 @@ public:
         vfSubscribe.assign(256, false);
 
         // Be shy and don't send version until we hear
-        //if (!fInbound)
-        //    PushVersion();
-
-        PushVersion();
+        if (!fInbound)
+            PushVersion();
     }
 
     ~CNode()
