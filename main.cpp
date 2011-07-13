@@ -53,7 +53,8 @@ map<string, string> mapAddressBook;
 CCriticalSection cs_mapAddressBook;
 
 map<pair<string, int>, int64> mapAccountBalanceCache;
-CCriticalSection cs_mapAccountBalanceCache;
+CCriticalSection cs_mapAccountBalanceCacheRead;
+CCriticalSection cs_mapAccountBalanceCacheWrite;
 
 vector<unsigned char> vchDefaultKey;
 
@@ -119,12 +120,15 @@ vector<unsigned char> GenerateNewKey()
 
 void CreateAccountBalanceCache() 
 {
-    CRITICAL_BLOCK(cs_mapAccountBalanceCache)
+    // Strategy: take only the write lock first and
+    // allow read-only access to the old cache while the
+    // new one is building; then copy the replacement over
+    CRITICAL_BLOCK(cs_mapAccountBalanceCacheWrite)
     {
         printf("Rebuilding balance cache...\n");
 
         CWalletDB walletdb;
-        mapAccountBalanceCache.clear();
+        map<pair<string, int>, int64> mapAccountBalanceCacheReplacement;
 
         CRITICAL_BLOCK(cs_mapAddressBook)
         {
@@ -136,7 +140,7 @@ void CreateAccountBalanceCache()
 
                 for (int nMinDepth = 0; nMinDepth <= ACCOUNT_BALANCE_CACHE_DEPTH; nMinDepth++)
                 {
-                    mapAccountBalanceCache[make_pair(addressBookItem.second, nMinDepth)] = 0;
+                    mapAccountBalanceCacheReplacement[make_pair(addressBookItem.second, nMinDepth)] = 0;
                 }
             }
 
@@ -149,14 +153,26 @@ void CreateAccountBalanceCache()
                     if (!wtx.IsFinal())
                         continue;
 
-                    wtx.UpdateAccountBalanceCache();
+                    wtx.UpdateAccountBalanceCache(mapAccountBalanceCacheReplacement);
                 }
 
                 // Tally internal accounting entries
-                foreach(const PAIRTYPE(const PAIRTYPE (string, int)&, int64)& item, mapAccountBalanceCache)
+                foreach(const PAIRTYPE(const PAIRTYPE (string, int)&, int64)& item, mapAccountBalanceCacheReplacement)
                 {
-                    mapAccountBalanceCache[item.first] += walletdb.GetAccountCreditDebit(item.first.first);
+                    mapAccountBalanceCacheReplacement[item.first] += walletdb.GetAccountCreditDebit(item.first.first);
                 }
+            }
+        }
+
+        // copy from replacement to actual cache
+        // note: we don't clear the cache, as a call to 'getaccountaddress'
+        // might have added a new entry in the meantime (this is safe, as
+        // getaccountaddress only touches the cache for new accounts)
+        CRITICAL_BLOCK(cs_mapAccountBalanceCacheRead)
+        {
+            foreach(const PAIRTYPE(const PAIRTYPE (string, int)&, int64)& item, mapAccountBalanceCacheReplacement)
+            {
+                mapAccountBalanceCache[item.first] = item.second;
             }
         }
     }
@@ -233,9 +249,10 @@ bool AddToWallet(const CWalletTx& wtxIn)
             monitorTx(wtx);
 
         // Adjust balance cache
-        CRITICAL_BLOCK(cs_mapAccountBalanceCache)
+        CRITICAL_BLOCK(cs_mapAccountBalanceCacheWrite)
+        CRITICAL_BLOCK(cs_mapAccountBalanceCacheRead)
         {
-            wtx.UpdateAccountBalanceCache();
+            wtx.UpdateAccountBalanceCache(mapAccountBalanceCache);
         }
     }
 
@@ -577,7 +594,7 @@ void CWalletTx::GetAccountAmounts(const string& strAccount, int64& nGenerated, i
     }
 }
 
-void CWalletTx::UpdateAccountBalanceCache() const
+void CWalletTx::UpdateAccountBalanceCache(map<pair<string, int>, int64>& cache) const
 {
     int64 allGeneratedImmature, allGeneratedMature, allFee;
     allGeneratedImmature = allGeneratedMature = allFee = 0;
@@ -589,11 +606,11 @@ void CWalletTx::UpdateAccountBalanceCache() const
     for (int nMinDepth = 0; nMinDepth <= ACCOUNT_BALANCE_CACHE_DEPTH; nMinDepth++)
     {
         // see if an account was affected by sending money somewhere
-        if (mapAccountBalanceCache.count(make_pair(strSentAccount, nMinDepth)))
+        if (cache.count(make_pair(strSentAccount, nMinDepth)))
         {
             foreach(const PAIRTYPE(string,int64)& s, listSent)
-                mapAccountBalanceCache[make_pair(strSentAccount, nMinDepth)] -= s.second;
-            mapAccountBalanceCache[make_pair(strSentAccount, nMinDepth)] -= allFee;
+                cache[make_pair(strSentAccount, nMinDepth)] -= s.second;
+            cache[make_pair(strSentAccount, nMinDepth)] -= allFee;
         }
 
         // go through listReceived and update accounts that are affected
@@ -601,9 +618,9 @@ void CWalletTx::UpdateAccountBalanceCache() const
         {
             foreach(const PAIRTYPE(string,int64)& r, listReceived)
             {
-                if (mapAddressBook.count(r.first) && mapAccountBalanceCache.count(make_pair(mapAddressBook[r.first], nMinDepth)))
+                if (mapAddressBook.count(r.first) && cache.count(make_pair(mapAddressBook[r.first], nMinDepth)))
                 {
-                    mapAccountBalanceCache[make_pair(mapAddressBook[r.first], nMinDepth)] += r.second;
+                    cache[make_pair(mapAddressBook[r.first], nMinDepth)] += r.second;
                 }
             }
         }

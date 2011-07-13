@@ -360,10 +360,14 @@ string GetAccountAddress(string strAccount, bool bForceNew=false)
         walletdb.WriteAccount(strAccount, account);
 
         // Update balance cache
-        CRITICAL_BLOCK(cs_mapAccountBalanceCache)
+        // Optimization: we don't need the write lock here,
+        // as we don't touch any existing entries
+        CRITICAL_BLOCK(cs_mapAccountBalanceCacheRead)
         {
-            for (int nMinDepth = 0; nMinDepth <= ACCOUNT_BALANCE_CACHE_DEPTH; nMinDepth++)
-                mapAccountBalanceCache[make_pair(strAccount, nMinDepth)] = 0;
+            if (mapAccountBalanceCache.count(make_pair(strAccount, 0)) == 0) {
+                for (int nMinDepth = 0; nMinDepth <= ACCOUNT_BALANCE_CACHE_DEPTH; nMinDepth++)
+                    mapAccountBalanceCache[make_pair(strAccount, nMinDepth)] = 0;
+            }
         }
     }
 
@@ -613,7 +617,7 @@ Value getreceivedbyaccount(const Array& params, bool fHelp)
 int64 GetAccountBalance(CWalletDB& walletdb, const string& strAccount, int nMinDepth, bool fUseCache = true)
 {
     // check the cache first
-    CRITICAL_BLOCK(cs_mapAccountBalanceCache)
+    CRITICAL_BLOCK(cs_mapAccountBalanceCacheRead)
     {
         map<pair<string, int>, int64>::iterator it = mapAccountBalanceCache.find(make_pair(strAccount, nMinDepth));
         if (fUseCache && it != mapAccountBalanceCache.end())
@@ -772,7 +776,8 @@ Value movecmd(const Array& params, bool fHelp)
         walletdb.TxnCommit();
 
         // Update balance cache
-        CRITICAL_BLOCK(cs_mapAccountBalanceCache)
+        CRITICAL_BLOCK(cs_mapAccountBalanceCacheWrite)
+        CRITICAL_BLOCK(cs_mapAccountBalanceCacheRead)
         {
             if (mapAccountBalanceCache.count(make_pair(strFrom, 0)) > 0) {
                 for (int i = 0; i <= ACCOUNT_BALANCE_CACHE_DEPTH; i++)
