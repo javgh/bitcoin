@@ -770,6 +770,20 @@ Value movecmd(const Array& params, bool fHelp)
         walletdb.WriteAccountingEntry(credit);
 
         walletdb.TxnCommit();
+
+        // Update balance cache
+        CRITICAL_BLOCK(cs_mapAccountBalanceCache)
+        {
+            if (mapAccountBalanceCache.count(make_pair(strFrom, 0)) > 0) {
+                for (int i = 0; i <= ACCOUNT_BALANCE_CACHE_DEPTH; i++)
+                    mapAccountBalanceCache[make_pair(strFrom, i)] -= nAmount;
+            }
+
+            if (mapAccountBalanceCache.count(make_pair(strTo, 0)) > 0) {
+                for (int i = 0; i <= ACCOUNT_BALANCE_CACHE_DEPTH; i++)
+                    mapAccountBalanceCache[make_pair(strTo, i)] += nAmount;
+            }
+        }
     }
     return true;
 }
