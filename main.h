@@ -57,7 +57,8 @@ extern std::set<std::string> setMonitorTx; // set of urls listening for new tran
 extern std::set<std::string> setMonitorBlocks; // set of urls listening for new blocks
 
 extern map<pair<string, int>, int64> mapAccountBalanceCache;
-extern CCriticalSection cs_mapAccountBalanceCache;
+extern CCriticalSection cs_mapAccountBalanceCacheRead;
+extern CCriticalSection cs_mapAccountBalanceCacheWrite;
 
 // Settings
 extern int fGenerateBitcoins;
@@ -1010,7 +1011,7 @@ public:
     void GetAccountAmounts(const string& strAccount, int64& nGenerated, int64& nReceived, 
                            int64& nSent, int64& nFee) const;
 
-    void UpdateAccountBalanceCache() const;
+    void UpdateAccountBalanceCache(map<pair<string, int>, int64>& cache) const;
 
     bool IsFromMe() const
     {
