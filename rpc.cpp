@@ -485,6 +485,30 @@ Value getaddressesbyaccount(const Array& params, bool fHelp)
     return ret;
 }
 
+Value getaddressbook(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getaddressbook\n"
+            "Returns the contents of the address book.");
+
+    Object ret;
+    CRITICAL_BLOCK(cs_mapAddressBook)
+    {
+        foreach(const PAIRTYPE(string, string)& item, mapAddressBook)
+        {
+            const string& strAddress = item.first;
+            const string& strName = item.second;
+
+            // We're only adding valid bitcoin addresses and not ip addresses
+            CScript scriptPubKey;
+            if (scriptPubKey.SetBitcoinAddress(strAddress))
+                ret.push_back(Pair(strAddress, strName));
+        }
+    }
+    return ret;
+}
+
 Value sendtoaddress(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 2 || params.size() > 4)
@@ -1460,6 +1484,38 @@ Value getblock(const Array& params, bool fHelp)
     return blockToJSON(block, pblockindex);
 }
 
+Value removeprivkey(const Array& params, bool fHelp)
+{
+    if(fHelp || params.size() != 1)
+        throw runtime_error(
+            "removeprivkey <bitcoinaddress>\n"
+            "Removes the private key corresponding to <bitcoinaddress>.");
+
+    string addr = params[0].get_str();
+    uint160 address;
+    bool fGood = AddressToHash160(addr, address);
+    if (fGood<0)
+        throw JSONRPCError(-5, "Invalid bitcoin address");
+
+    vector<unsigned char> &pubKey = mapPubKeys[address];
+
+    if (!mapKeys.count(pubKey))
+        throw JSONRPCError(-4, "Private key for address " + addr + " is not known");
+
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_mapKeys)
+    CRITICAL_BLOCK(cs_mapWallet)
+    CRITICAL_BLOCK(cs_mapAddressBook)
+    {
+        CWalletDB().EraseName(addr);
+        CWalletDB().EraseKey(pubKey);
+
+        mapKeys.erase(pubKey);
+        mapPubKeys.erase(address);
+    }
+    return addr;
+}
+
 
 
 
@@ -1492,6 +1548,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("getaccount",            &getaccount),
     make_pair("getlabel",              &getaccount), // deprecated
     make_pair("getaddressesbyaccount", &getaddressesbyaccount),
+    make_pair("getaddressbook",        &getaddressbook),
     make_pair("getaddressesbylabel",   &getaddressesbyaccount), // deprecated
     make_pair("sendtoaddress",         &sendtoaddress),
     make_pair("getamountreceived",     &getreceivedbyaddress), // deprecated, renamed to getreceivedbyaddress
@@ -1516,6 +1573,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("monitorblocks",         &monitorblocks),
     make_pair("listmonitored",         &listmonitored),
     make_pair("getblock",              &getblock),
+    make_pair("removeprivkey",         &removeprivkey),
 };
 map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
 
