@@ -703,15 +703,6 @@ Value getbalance(const Array& params, bool fHelp)
 
     int64 nBalance= GetAccountBalance(strAccount, nMinDepth);
 
-    // double check cache
-    if (rand() % 4096 == 0) {
-        int64 nBalanceCheck = GetAccountBalance(strAccount, nMinDepth, false);
-        if (nBalance == nBalanceCheck)
-            printf("Cache worked for %s\n", strAccount.c_str());
-        else
-            printf("Warning: Cache did not work for %s (%d != %d)\n", strAccount.c_str(), nBalance, nBalanceCheck);
-    }
-
     return ValueFromAmount(nBalance);
 }
 
