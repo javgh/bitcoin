@@ -130,6 +130,7 @@ void CreateAccountBalanceCache()
         CWalletDB walletdb;
         map<pair<string, int>, int64> mapAccountBalanceCacheReplacement;
 
+        CRITICAL_BLOCK(cs_mapWallet)
         CRITICAL_BLOCK(cs_mapAddressBook)
         {
             // find all accounts
@@ -144,23 +145,20 @@ void CreateAccountBalanceCache()
                 }
             }
 
-            CRITICAL_BLOCK(cs_mapWallet)
+            // Tally wallet transactions
+            for (map<uint256, CWalletTx>::iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
             {
-                // Tally wallet transactions
-                for (map<uint256, CWalletTx>::iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
-                {
-                    const CWalletTx& wtx = (*it).second;
-                    if (!wtx.IsFinal())
-                        continue;
+                const CWalletTx& wtx = (*it).second;
+                if (!wtx.IsFinal())
+                    continue;
 
-                    wtx.UpdateAccountBalanceCache(mapAccountBalanceCacheReplacement);
-                }
+                wtx.UpdateAccountBalanceCache(mapAccountBalanceCacheReplacement);
+            }
 
-                // Tally internal accounting entries
-                foreach(const PAIRTYPE(const PAIRTYPE (string, int)&, int64)& item, mapAccountBalanceCacheReplacement)
-                {
-                    mapAccountBalanceCacheReplacement[item.first] += walletdb.GetAccountCreditDebit(item.first.first);
-                }
+            // Tally internal accounting entries
+            foreach(const PAIRTYPE(const PAIRTYPE (string, int)&, int64)& item, mapAccountBalanceCacheReplacement)
+            {
+                mapAccountBalanceCacheReplacement[item.first] += walletdb.GetAccountCreditDebit(item.first.first);
             }
         }
 
