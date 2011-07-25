@@ -73,7 +73,6 @@ int fLimitProcessors = false;
 int nLimitProcessors = 1;
 int fMinimizeToTray = true;
 int fMinimizeOnClose = true;
-string instapayAddress = "1CDysWzQ5Z4hMLhsj4AKAEFwrgXRC8DqRN";
 #ifdef USE_UPNP
 #if USE_UPNP
 int fUseUPnP = true;
@@ -3872,7 +3871,7 @@ int64 GetBalance()
 }
 
 
-bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<pair<CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet, bool fUseInstapay)
+bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<pair<CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet)
 {
     setCoinsRet.clear();
     nValueRet = 0;
@@ -3913,24 +3912,6 @@ bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<
                 int64 n = pcoin->vout[i].nValue;
 
                 if (n <= 0)
-                    continue;
-
-                // Instapay: check address of the output
-                string address;
-                uint160 hash160;
-                vector<unsigned char> vchPubKey;
-                if (ExtractHash160(pcoin->vout[i].scriptPubKey, hash160))
-                    address = Hash160ToAddress(hash160);
-                else if (ExtractPubKey(pcoin->vout[i].scriptPubKey, false, vchPubKey))
-                    address = PubKeyToAddress(vchPubKey);
-                else
-                    address = "unknown";
-                bool fInstapay = instapayAddress.compare(address) == 0;
-
-                // skip this coin if
-                //    a) it's from the Instapay address, but we were not asked to use Instapay
-                // or b) it's not from the Instapay address, but we were asked to use Instapay
-                if (fInstapay != fUseInstapay)
                     continue;
 
                 pair<int64,pair<CWalletTx*,unsigned int> > coin = make_pair(n,make_pair(pcoin,i));
@@ -4036,18 +4017,18 @@ bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<
     return true;
 }
 
-bool SelectCoins(int64 nTargetValue, set<pair<CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet, bool fUseInstapay)
+bool SelectCoins(int64 nTargetValue, set<pair<CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet)
 {
-    return (SelectCoinsMinConf(nTargetValue, 1, 6, setCoinsRet, nValueRet, fUseInstapay) ||
-            SelectCoinsMinConf(nTargetValue, 1, 1, setCoinsRet, nValueRet, fUseInstapay) ||
-            SelectCoinsMinConf(nTargetValue, 0, 1, setCoinsRet, nValueRet, fUseInstapay) ||
-            SelectCoinsMinConf(nTargetValue, 0, 0, setCoinsRet, nValueRet, fUseInstapay));
+    return (SelectCoinsMinConf(nTargetValue, 1, 6, setCoinsRet, nValueRet) ||
+            SelectCoinsMinConf(nTargetValue, 1, 1, setCoinsRet, nValueRet) ||
+            SelectCoinsMinConf(nTargetValue, 0, 1, setCoinsRet, nValueRet) ||
+            SelectCoinsMinConf(nTargetValue, 0, 0, setCoinsRet, nValueRet));
 }
 
 
 
 
-bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, int64& nFeeRet, bool fUseInstapay)
+bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, int64& nFeeRet)
 {
     int64 nValue = 0;
     foreach (const PAIRTYPE(CScript, int64)& s, vecSend)
@@ -4081,7 +4062,7 @@ bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& 
                 // Choose coins to use
                 set<pair<CWalletTx*,unsigned int> > setCoins;
                 int64 nValueIn = 0;
-                if (!SelectCoins(nTotalValue, setCoins, nValueIn, fUseInstapay))
+                if (!SelectCoins(nTotalValue, setCoins, nValueIn))
                     return false;
                 foreach(PAIRTYPE(CWalletTx*, unsigned int) pcoin, setCoins)
                 {
@@ -4093,39 +4074,27 @@ bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& 
                 int64 nChange = nValueIn - nTotalValue;
                 if (nChange >= CENT)
                 {
-                    if (fUseInstapay)
-                    {
-                        // Make sure change goes back to the Instapay address, so we are not running out of funds
-                        CScript scriptChange;
-                        scriptChange.SetBitcoinAddress(instapayAddress);
-                        wtxNew.vout.push_back(CTxOut(nChange, scriptChange));
+                    // Note: We use a new key here to keep it from being obvious which side is the change.
+                    //  The drawback is that by not reusing a previous key, the change may be lost if a
+                    //  backup is restored, if the backup doesn't have the new private key for the change.
+                    //  If we reused the old key, it would be possible to add code to look for and
+                    //  rediscover unknown transactions that were written with keys of ours to recover
+                    //  post-backup change.
 
-                        reservekey.ReturnKey();
-                    }
+                    // Reserve a new key pair from key pool
+                    vector<unsigned char> vchPubKey = reservekey.GetReservedKey();
+                    assert(mapKeys.count(vchPubKey));
+
+                    // Fill a vout to ourself, using same address type as the payment
+                    CScript scriptChange;
+                    if (vecSend[0].first.GetBitcoinAddressHash160() != 0)
+                        scriptChange.SetBitcoinAddress(vchPubKey);
                     else
-                    {
-                        // Note: We use a new key here to keep it from being obvious which side is the change.
-                        //  The drawback is that by not reusing a previous key, the change may be lost if a
-                        //  backup is restored, if the backup doesn't have the new private key for the change.
-                        //  If we reused the old key, it would be possible to add code to look for and
-                        //  rediscover unknown transactions that were written with keys of ours to recover
-                        //  post-backup change.
+                        scriptChange << vchPubKey << OP_CHECKSIG;
 
-                        // Reserve a new key pair from key pool
-                        vector<unsigned char> vchPubKey = reservekey.GetReservedKey();
-                        assert(mapKeys.count(vchPubKey));
-
-                        // Fill a vout to ourself, using same address type as the payment
-                        CScript scriptChange;
-                        if (vecSend[0].first.GetBitcoinAddressHash160() != 0)
-                            scriptChange.SetBitcoinAddress(vchPubKey);
-                        else
-                            scriptChange << vchPubKey << OP_CHECKSIG;
-
-                        // Insert change txn at random position:
-                        vector<CTxOut>::iterator position = wtxNew.vout.begin()+GetRandInt(wtxNew.vout.size());
-                        wtxNew.vout.insert(position, CTxOut(nChange, scriptChange));
-                    }
+                    // Insert change txn at random position:
+                    vector<CTxOut>::iterator position = wtxNew.vout.begin()+GetRandInt(wtxNew.vout.size());
+                    wtxNew.vout.insert(position, CTxOut(nChange, scriptChange));
                 }
                 else
                     reservekey.ReturnKey();
@@ -4168,11 +4137,11 @@ bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& 
     return true;
 }
 
-bool CreateTransaction(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew, CReserveKey& reservekey, int64& nFeeRet, bool fUseInstapay)
+bool CreateTransaction(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew, CReserveKey& reservekey, int64& nFeeRet)
 {
     vector< pair<CScript, int64> > vecSend;
     vecSend.push_back(make_pair(scriptPubKey, nValue));
-    return CreateTransaction(vecSend, wtxNew, reservekey, nFeeRet, fUseInstapay);
+    return CreateTransaction(vecSend, wtxNew, reservekey, nFeeRet);
 }
 
 // Call after CreateTransaction unless you want to abort
@@ -4227,11 +4196,11 @@ bool CommitTransaction(CWalletTx& wtxNew, CReserveKey& reservekey)
 
 
 // requires cs_main lock
-string SendMoney(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew, bool fAskFee, bool fUseInstapay)
+string SendMoney(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew, bool fAskFee)
 {
     CReserveKey reservekey;
     int64 nFeeRequired;
-    if (!CreateTransaction(scriptPubKey, nValue, wtxNew, reservekey, nFeeRequired, fUseInstapay))
+    if (!CreateTransaction(scriptPubKey, nValue, wtxNew, reservekey, nFeeRequired))
     {
         string strError;
         if (nValue + nFeeRequired > GetBalance())
@@ -4255,7 +4224,7 @@ string SendMoney(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew, bool fAs
 
 
 // requires cs_main lock
-string SendMoneyToBitcoinAddress(string strAddress, int64 nValue, CWalletTx& wtxNew, bool fAskFee, bool fUseInstapay)
+string SendMoneyToBitcoinAddress(string strAddress, int64 nValue, CWalletTx& wtxNew, bool fAskFee)
 {
     // Check amount
     if (nValue <= 0)
@@ -4268,5 +4237,5 @@ string SendMoneyToBitcoinAddress(string strAddress, int64 nValue, CWalletTx& wtx
     if (!scriptPubKey.SetBitcoinAddress(strAddress))
         return _("Invalid bitcoin address");
 
-    return SendMoney(scriptPubKey, nValue, wtxNew, fAskFee, fUseInstapay);
+    return SendMoney(scriptPubKey, nValue, wtxNew, fAskFee);
 }

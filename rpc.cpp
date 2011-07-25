@@ -847,40 +847,6 @@ Value sendfrom(const Array& params, bool fHelp)
     return wtx.GetHash().GetHex();
 }
 
-Value sendinstapay(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 3 || params.size() > 4)
-        throw runtime_error(
-            "sendinstapay <fromaccount> <tobitcoinaddress> <amount> [minconf=1]\n"
-            "<amount> is a real and is rounded to the nearest 0.01");
-
-    string strAccount = AccountFromValue(params[0]);
-    string strAddress = params[1].get_str();
-    int64 nAmount = AmountFromValue(params[2]);
-    int nMinDepth = 1;
-    if (params.size() > 3)
-        nMinDepth = params[3].get_int();
-
-    CWalletTx wtx;
-    wtx.strFromAccount = strAccount;
-
-    CRITICAL_BLOCK(cs_main)
-    CRITICAL_BLOCK(cs_mapWallet)
-    {
-        // Check funds
-        int64 nBalance = GetAccountBalance(strAccount, nMinDepth);
-        if (nAmount > nBalance)
-            throw JSONRPCError(-6, "Account has insufficient funds");
-
-        // Send
-        string strError = SendMoneyToBitcoinAddress(strAddress, nAmount, wtx, false, true);
-        if (strError != "")
-            throw JSONRPCError(-4, strError);
-    }
-
-    return wtx.GetHash().GetHex();
-}
-
 Value sendmany(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 2 || params.size() > 4)
@@ -1589,7 +1555,6 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("getbalance",            &getbalance),
     make_pair("move",                  &movecmd),
     make_pair("sendfrom",              &sendfrom),
-    make_pair("sendinstapay",          &sendinstapay),
     make_pair("sendmany",              &sendmany),
     make_pair("gettransaction",        &gettransaction),
     make_pair("listtransactions",      &listtransactions),
@@ -2202,8 +2167,6 @@ int CommandLineRPC(int argc, char *argv[])
         if (strMethod == "move"                   && n > 3) ConvertTo<boost::int64_t>(params[3]);
         if (strMethod == "sendfrom"               && n > 2) ConvertTo<double>(params[2]);
         if (strMethod == "sendfrom"               && n > 3) ConvertTo<boost::int64_t>(params[3]);
-        if (strMethod == "sendinstapay"           && n > 2) ConvertTo<double>(params[2]);
-        if (strMethod == "sendinstapay"           && n > 3) ConvertTo<boost::int64_t>(params[3]);
         if (strMethod == "listtransactions"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
         if (strMethod == "listaccounts"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
         if (strMethod == "sendmany"               && n > 1)
