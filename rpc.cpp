@@ -485,6 +485,30 @@ Value getaddressesbyaccount(const Array& params, bool fHelp)
     return ret;
 }
 
+Value getaddressbook(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getaddressbook\n"
+            "Returns the contents of the address book.");
+
+    Object ret;
+    CRITICAL_BLOCK(cs_mapAddressBook)
+    {
+        foreach(const PAIRTYPE(string, string)& item, mapAddressBook)
+        {
+            const string& strAddress = item.first;
+            const string& strName = item.second;
+
+            // We're only adding valid bitcoin addresses and not ip addresses
+            CScript scriptPubKey;
+            if (scriptPubKey.SetBitcoinAddress(strAddress))
+                ret.push_back(Pair(strAddress, strName));
+        }
+    }
+    return ret;
+}
+
 Value sendtoaddress(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 2 || params.size() > 4)
@@ -703,15 +727,6 @@ Value getbalance(const Array& params, bool fHelp)
 
     int64 nBalance= GetAccountBalance(strAccount, nMinDepth);
 
-    // double check cache
-    if (rand() % 4096 == 0) {
-        int64 nBalanceCheck = GetAccountBalance(strAccount, nMinDepth, false);
-        if (nBalance == nBalanceCheck)
-            printf("Cache worked for %s\n", strAccount.c_str());
-        else
-            printf("Warning: Cache did not work for %s (%d != %d)\n", strAccount.c_str(), nBalance, nBalanceCheck);
-    }
-
     return ValueFromAmount(nBalance);
 }
 
@@ -825,6 +840,41 @@ Value sendfrom(const Array& params, bool fHelp)
 
         // Send
         string strError = SendMoneyToBitcoinAddress(strAddress, nAmount, wtx);
+        if (strError != "")
+            throw JSONRPCError(-4, strError);
+    }
+
+    return wtx.GetHash().GetHex();
+}
+
+Value sendgreen(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() < 3 || params.size() > 4)
+        throw runtime_error(
+            "sendgreen <fromaccount> <tobitcoinaddress> <amount> [minconf=1]\n"
+            "<amount> is a real and is rounded to the nearest 0.01.\n"
+            "Create a transaction that uses only coins from the green address.");
+
+    string strAccount = AccountFromValue(params[0]);
+    string strAddress = params[1].get_str();
+    int64 nAmount = AmountFromValue(params[2]);
+    int nMinDepth = 1;
+    if (params.size() > 3)
+        nMinDepth = params[3].get_int();
+
+    CWalletTx wtx;
+    wtx.strFromAccount = strAccount;
+
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_mapWallet)
+    {
+        // Check funds
+        int64 nBalance = GetAccountBalance(strAccount, nMinDepth);
+        if (nAmount > nBalance)
+            throw JSONRPCError(-6, "Account has insufficient funds");
+
+        // Send
+        string strError = SendMoneyToBitcoinAddress(strAddress, nAmount, wtx, false, true);
         if (strError != "")
             throw JSONRPCError(-4, strError);
     }
@@ -1460,6 +1510,38 @@ Value getblock(const Array& params, bool fHelp)
     return blockToJSON(block, pblockindex);
 }
 
+Value removeprivkey(const Array& params, bool fHelp)
+{
+    if(fHelp || params.size() != 1)
+        throw runtime_error(
+            "removeprivkey <bitcoinaddress>\n"
+            "Removes the private key corresponding to <bitcoinaddress>.");
+
+    string addr = params[0].get_str();
+    uint160 address;
+    bool fGood = AddressToHash160(addr, address);
+    if (fGood<0)
+        throw JSONRPCError(-5, "Invalid bitcoin address");
+
+    vector<unsigned char> &pubKey = mapPubKeys[address];
+
+    if (!mapKeys.count(pubKey))
+        throw JSONRPCError(-4, "Private key for address " + addr + " is not known");
+
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_mapKeys)
+    CRITICAL_BLOCK(cs_mapWallet)
+    CRITICAL_BLOCK(cs_mapAddressBook)
+    {
+        CWalletDB().EraseName(addr);
+        CWalletDB().EraseKey(pubKey);
+
+        mapKeys.erase(pubKey);
+        mapPubKeys.erase(address);
+    }
+    return addr;
+}
+
 
 
 
@@ -1492,6 +1574,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("getaccount",            &getaccount),
     make_pair("getlabel",              &getaccount), // deprecated
     make_pair("getaddressesbyaccount", &getaddressesbyaccount),
+    make_pair("getaddressbook",        &getaddressbook),
     make_pair("getaddressesbylabel",   &getaddressesbyaccount), // deprecated
     make_pair("sendtoaddress",         &sendtoaddress),
     make_pair("getamountreceived",     &getreceivedbyaddress), // deprecated, renamed to getreceivedbyaddress
@@ -1507,6 +1590,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("getbalance",            &getbalance),
     make_pair("move",                  &movecmd),
     make_pair("sendfrom",              &sendfrom),
+    make_pair("sendgreen",             &sendgreen),
     make_pair("sendmany",              &sendmany),
     make_pair("gettransaction",        &gettransaction),
     make_pair("listtransactions",      &listtransactions),
@@ -1516,6 +1600,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("monitorblocks",         &monitorblocks),
     make_pair("listmonitored",         &listmonitored),
     make_pair("getblock",              &getblock),
+    make_pair("removeprivkey",         &removeprivkey),
 };
 map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
 
@@ -2118,6 +2203,8 @@ int CommandLineRPC(int argc, char *argv[])
         if (strMethod == "move"                   && n > 3) ConvertTo<boost::int64_t>(params[3]);
         if (strMethod == "sendfrom"               && n > 2) ConvertTo<double>(params[2]);
         if (strMethod == "sendfrom"               && n > 3) ConvertTo<boost::int64_t>(params[3]);
+        if (strMethod == "sendgreen"              && n > 2) ConvertTo<double>(params[2]);
+        if (strMethod == "sendgreen"              && n > 3) ConvertTo<boost::int64_t>(params[3]);
         if (strMethod == "listtransactions"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
         if (strMethod == "listaccounts"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
         if (strMethod == "sendmany"               && n > 1)
