@@ -29,7 +29,7 @@ extern string JSONRPCReply(const Value& result, const Value& error, const Value&
 extern string JSONRPCRequest(const string& strMethod, const Array& params, const Value& id);
 extern int ReadHTTP(std::basic_istream<char>& stream, map<string, string>& mapHeadersRet, string& strMessageRet);
 extern double GetDifficulty(const CBlockIndex* blockindex = pindexBest);
-extern void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDepth, bool fLong, Array& ret);
+extern void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDepth, bool fLong, Array& ret, bool fShowGenerated=true);
 
 
 void ThreadHTTPPOST2(void* parg);

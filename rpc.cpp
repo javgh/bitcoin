@@ -1091,7 +1091,7 @@ Value listreceivedbyaccount(const Array& params, bool fHelp)
     return ListReceived(params, true);
 }
 
-void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDepth, bool fLong, Array& ret)
+void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDepth, bool fLong, Array& ret, bool fShowGenerated=true)
 {
     int64 nGeneratedImmature, nGeneratedMature, nFee;
     string strSentAccount;
@@ -1102,7 +1102,7 @@ void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDe
     bool fAllAccounts = (strAccount == string("*"));
 
     // Generated blocks assigned to account ""
-    if ((nGeneratedMature+nGeneratedImmature) != 0 && (fAllAccounts || strAccount == ""))
+    if (fShowGenerated && (nGeneratedMature+nGeneratedImmature) != 0 && (fAllAccounts || strAccount == ""))
     {
         Object entry;
         entry.push_back(Pair("account", string("")));
@@ -1178,6 +1178,49 @@ void AcentryToJSON(const CAccountingEntry& acentry, const string& strAccount, Ar
         entry.push_back(Pair("comment", acentry.strComment));
         ret.push_back(entry);
     }
+}
+
+Value listreceivedsince(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "listreceivedsince <timestamp>\n"
+            "Returns all transactions from <timestamp>.");
+
+    boost::int64_t timest = params[0].get_int();
+    string strAccount = "*";
+
+    Array ret;
+    CWalletDB walletdb;
+
+    CRITICAL_BLOCK(cs_mapWallet)
+    {
+        // Firs: get all CWalletTx and CAccountingEntry into a sorted-by-time multimap:
+        typedef pair<CWalletTx*, CAccountingEntry*> TxPair;
+        typedef multimap<int64, TxPair > TxItems;
+        TxItems txByTime;
+
+        for (map<uint256, CWalletTx>::iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
+        {
+            CWalletTx* wtx = &((*it).second);
+            if (wtx->GetTxTime() >= timest)
+                txByTime.insert(make_pair(wtx->GetTxTime(), TxPair(wtx, (CAccountingEntry*)0)));
+        }
+
+        // Now: iterate backwards until we have the items to return:
+        TxItems::reverse_iterator it = txByTime.rbegin();
+        for (; it != txByTime.rend(); ++it)
+        {
+            CWalletTx *const pwtx = (*it).second.first;
+            if (pwtx != 0)
+                ListTransactions(*pwtx, strAccount, 0, true, ret, false);
+        }
+        // ret is now newest to oldest
+    }
+    
+    std::reverse(ret.begin(), ret.end()); // oldest to newest
+
+    return ret;
 }
 
 Value listtransactions(const Array& params, bool fHelp)
@@ -1594,6 +1637,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("sendmany",              &sendmany),
     make_pair("gettransaction",        &gettransaction),
     make_pair("listtransactions",      &listtransactions),
+    make_pair("listreceivedsince",     &listreceivedsince),
     make_pair("getwork",               &getwork),
     make_pair("listaccounts",          &listaccounts),
     make_pair("monitortx",             &monitortx),
@@ -2206,6 +2250,7 @@ int CommandLineRPC(int argc, char *argv[])
         if (strMethod == "sendgreen"              && n > 2) ConvertTo<double>(params[2]);
         if (strMethod == "sendgreen"              && n > 3) ConvertTo<boost::int64_t>(params[3]);
         if (strMethod == "listtransactions"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
+        if (strMethod == "listreceivedsince"      && n > 0) ConvertTo<boost::int64_t>(params[0]);
         if (strMethod == "listaccounts"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
         if (strMethod == "sendmany"               && n > 1)
         {
