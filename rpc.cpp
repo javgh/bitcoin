@@ -317,6 +317,20 @@ Value getnewaddress(const Array& params, bool fHelp)
     string strAddress = PubKeyToAddress(GetKeyFromKeyPool());
 
     SetAddressBookName(strAddress, strAccount);
+
+    // Update balance cache
+    // Optimization: we don't need the write lock here,
+    // as we don't touch any existing entries
+    if (params.size() > 0) {
+        CRITICAL_BLOCK(cs_mapAccountBalanceCacheRead)
+        {
+            if (mapAccountBalanceCache.count(make_pair(strAccount, 0)) == 0) {
+                for (int nMinDepth = 0; nMinDepth <= ACCOUNT_BALANCE_CACHE_DEPTH; nMinDepth++)
+                    mapAccountBalanceCache[make_pair(strAccount, nMinDepth)] = 0;
+            }
+        }
+    }
+
     return strAddress;
 }
 
