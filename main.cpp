@@ -247,6 +247,9 @@ bool AddToWallet(const CWalletTx& wtxIn)
         if (!setMonitorTx.empty())
             monitorTx(wtx);
 
+        // Support tx notification
+        SendNotifySignal(SIGUSR2);
+
         // Adjust balance cache
         CRITICAL_BLOCK(cs_mapAccountBalanceCacheWrite)
         CRITICAL_BLOCK(cs_mapAccountBalanceCacheRead)
@@ -1716,7 +1719,8 @@ bool CBlock::SetBestChain(CTxDB& txdb, CBlockIndex* pindexNew)
     }
 
     // Update best block in wallet (so we can detect restored wallets)
-    if (!IsInitialBlockDownload())
+    bool fInitialDownload = IsInitialBlockDownload();
+    if (!fInitialDownload)
     {
         CWalletDB walletdb;
         const CBlockLocator locator(pindexNew);
@@ -1733,7 +1737,27 @@ bool CBlock::SetBestChain(CTxDB& txdb, CBlockIndex* pindexNew)
     nTransactionsUpdated++;
     printf("SetBestChain: new best=%s  height=%d  work=%s\n", hashBestChain.ToString().substr(0,20).c_str(), nBestHeight, bnBestChainWork.ToString().c_str());
 
+    // Support block notification
+    if (!fInitialDownload)
+        SendNotifySignal(SIGUSR1);
+
     return true;
+}
+
+
+void SendNotifySignal(int signal) {
+    string strPidfile = mapArgs["-notifypidfile"];
+    if(strPidfile != "")
+    {
+        FILE *file = fopen(strPidfile.c_str(), "r");
+        if(file)
+        {
+            int nPid = 0;
+            if ((fscanf(file, "%d", &nPid) == 1) && (nPid > 1))
+                kill((pid_t) nPid, signal);
+            fclose(file);
+        }
+    }
 }
 
 

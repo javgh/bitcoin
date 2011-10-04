@@ -108,6 +108,7 @@ bool CheckProofOfWork(uint256 hash, unsigned int nBits);
 bool IsInitialBlockDownload();
 string GetWarnings(string strFor);
 void CreateAccountBalanceCache();
+void SendNotifySignal(int signal);
 
 
 
