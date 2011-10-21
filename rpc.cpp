@@ -1356,6 +1356,19 @@ Value listaccounts(const Array& params, bool fHelp)
     return ret;
 }
 
+
+bool attemptInputAddressExtraction(const CScript& scriptSig, string& inputAddressRet) {
+    // assume structure of <sig> <pubKey>
+    // and try to extract the Bitcoin address
+    opcodetype opcode;
+    vector<unsigned char> vch;
+    CScript::const_iterator pc = scriptSig.begin();
+    if (!scriptSig.GetOp(pc, opcode, vch)) return false;
+    if (!scriptSig.GetOp(pc, opcode, vch)) return false;
+    inputAddressRet = PubKeyToAddress(vch);
+    return true;
+}
+
 Value gettransaction(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
@@ -1383,6 +1396,17 @@ Value gettransaction(const Array& params, bool fHelp)
             entry.push_back(Pair("fee", ValueFromAmount(nFee)));
 
         WalletTxToJSON(mapWallet[hash], entry);
+
+        Array inputAddresses;
+        for (int i = 0; i < wtx.vin.size(); i++)
+        {
+            string inputAddress;
+            if (attemptInputAddressExtraction(wtx.vin[i].scriptSig, inputAddress))
+            {
+                inputAddresses.push_back(inputAddress);
+            }
+        }
+        entry.push_back(Pair("inputaddresses", inputAddresses));
 
         Array details;
         ListTransactions(mapWallet[hash], "*", 0, false, details);
