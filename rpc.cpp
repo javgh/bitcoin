@@ -1358,7 +1358,7 @@ Value listaccounts(const Array& params, bool fHelp)
 
 
 bool attemptInputAddressExtraction(const CScript& scriptSig, string& inputAddressRet) {
-    // assume structure of <sig> <pubKey>
+    // check for something that looks like <sig> <pubKey>
     // and try to extract the Bitcoin address
     opcodetype opcode;
     vector<unsigned char> vch;
@@ -1366,6 +1366,7 @@ bool attemptInputAddressExtraction(const CScript& scriptSig, string& inputAddres
     if (!scriptSig.GetOp(pc, opcode, vch)) return false;
     if (!scriptSig.GetOp(pc, opcode, vch)) return false;
     inputAddressRet = PubKeyToAddress(vch);
+    if (scriptSig.GetOp(pc, opcode, vch)) return false; // there should be no further opcodes
     return true;
 }
 
