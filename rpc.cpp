@@ -1115,10 +1115,13 @@ void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDe
 
     bool fAllAccounts = (strAccount == string("*"));
 
+    int entryCount = 0;  // count the number of entries in 'ret' that this transaction creates
+
     // Generated blocks assigned to account ""
     if (fShowGenerated && (nGeneratedMature+nGeneratedImmature) != 0 && (fAllAccounts || strAccount == ""))
     {
         Object entry;
+        entry.push_back(Pair("entry", entryCount++));
         entry.push_back(Pair("account", string("")));
         if (nGeneratedImmature)
         {
@@ -1141,6 +1144,7 @@ void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDe
         foreach(const PAIRTYPE(string, int64)& s, listSent)
         {
             Object entry;
+            entry.push_back(Pair("entry", entryCount++));
             entry.push_back(Pair("account", strSentAccount));
             entry.push_back(Pair("address", s.first));
             entry.push_back(Pair("category", "send"));
@@ -1164,6 +1168,7 @@ void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDe
                 if (fAllAccounts || (account == strAccount))
                 {
                     Object entry;
+                    entry.push_back(Pair("entry", entryCount++));
                     entry.push_back(Pair("account", account));
                     entry.push_back(Pair("address", r.first));
                     entry.push_back(Pair("category", "receive"));
