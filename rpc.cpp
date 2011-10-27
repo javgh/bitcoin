@@ -1423,6 +1423,46 @@ Value gettransaction(const Array& params, bool fHelp)
 }
 
 
+Value getorigins(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "getorigins <txid>\n"
+            "Show - if applicable - from which Bitcoin addresses the coins originated that were used to fund <txid>");
+
+    uint256 hash;
+    hash.SetHex(params[0].get_str());
+
+    Object entry;
+    CRITICAL_BLOCK(cs_mapWallet)
+    {
+        if (!mapWallet.count(hash))
+            throw JSONRPCError(-5, "Invalid or non-wallet transaction id");
+        const CWalletTx& wtx = mapWallet[hash];
+
+        WalletTxToJSON(mapWallet[hash], entry);
+
+        Array origins;
+        CTxDB txdb("r");
+        CTxIndex txindex;
+        for (int i = 0; i < wtx.vin.size(); i++)
+        {
+            COutPoint outpoint = wtx.vin[i].prevout;
+            CTransaction txPrev;
+            if (txPrev.ReadFromDisk(txdb, outpoint, txindex))
+            {
+                vector<unsigned char> vchPubKey;
+                if (ExtractPubKey(txPrev.vout[outpoint.n].scriptPubKey, false, vchPubKey))
+                    origins.push_back(PubKeyToAddress(vchPubKey));
+            }
+        }
+        entry.push_back(Pair("origins", origins));
+    }
+
+    return entry;
+}
+
+
 Value backupwallet(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
@@ -1680,6 +1720,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("sendgreen",             &sendgreen),
     make_pair("sendmany",              &sendmany),
     make_pair("gettransaction",        &gettransaction),
+    make_pair("getorigins",            &getorigins),
     make_pair("listtransactions",      &listtransactions),
     make_pair("listreceivedsince",     &listreceivedsince),
     make_pair("getwork",               &getwork),
