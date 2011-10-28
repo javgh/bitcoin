@@ -73,7 +73,8 @@ int fLimitProcessors = false;
 int nLimitProcessors = 1;
 int fMinimizeToTray = true;
 int fMinimizeOnClose = true;
-string greenAddress = "1CDysWzQ5Z4hMLhsj4AKAEFwrgXRC8DqRN";
+string greenAddress = "12kuzuxsArR9hH3PFgzrwKvrSucgCJxd1i";
+int nMinDepthGreenCoins = 0;
 #ifdef USE_UPNP
 #if USE_UPNP
 int fUseUPnP = true;
@@ -3895,6 +3896,70 @@ int64 GetBalance()
     return nTotal;
 }
 
+bool SelectGreenCoin(pair<CWalletTx*,unsigned int>& coinRet)
+{
+    vector<pair<int64, pair<CWalletTx*,unsigned int> > > candidates;
+
+    CRITICAL_BLOCK(cs_mapWallet)
+    {
+       vector<CWalletTx*> vCoins;
+       vCoins.reserve(mapWallet.size());
+       for (map<uint256, CWalletTx>::iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
+           vCoins.push_back(&(*it).second);
+
+       foreach(CWalletTx* pcoin, vCoins)
+       {
+            //if (!pcoin->IsFinal() || !pcoin->IsConfirmed())
+            if (!pcoin->IsFinal()) // jav: noconfsend send
+                continue;
+
+            if (pcoin->IsCoinBase() && pcoin->GetBlocksToMaturity() > 0)
+                continue;
+
+            int nDepth = pcoin->GetDepthInMainChain();
+            if (nDepth < nMinDepthGreenCoins)
+                continue;
+
+            for (int i = 0; i < pcoin->vout.size(); i++)
+            {
+                if (pcoin->IsSpent(i) || !pcoin->vout[i].IsMine())
+                    continue;
+
+                int64 n = pcoin->vout[i].nValue;
+                if (n <= 0)
+                    continue;
+
+                // extract output address of coin
+                string address;
+                uint160 hash160;
+                vector<unsigned char> vchPubKey;
+                if (ExtractHash160(pcoin->vout[i].scriptPubKey, hash160))
+                    address = Hash160ToAddress(hash160);
+                else if (ExtractPubKey(pcoin->vout[i].scriptPubKey, false, vchPubKey))
+                    address = PubKeyToAddress(vchPubKey);
+                else
+                    address = "unknown";
+                bool fIsGreenAdress = greenAddress.compare(address) == 0;
+
+                // we are looking for green coins
+                if (!fIsGreenAdress)
+                    continue;
+
+                // record the coin along with the its number of confirmations
+                pair<int64,pair<CWalletTx*,unsigned int> > coin = make_pair(nDepth,make_pair(pcoin,i));
+                candidates.push_back(coin);
+            }
+       }
+    }
+
+    if (candidates.size() == 0)
+        return false;
+
+    sort(candidates.rbegin(), candidates.rend());
+    coinRet = candidates.back().second;
+    return true;
+}
+
 
 bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<pair<CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet, bool fUseGreenAddress)
 {
@@ -3939,7 +4004,7 @@ bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<
                 if (n <= 0)
                     continue;
 
-                // Green address: check address of the output
+                // extract output address of coin
                 string address;
                 uint160 hash160;
                 vector<unsigned char> vchPubKey;
@@ -3951,10 +4016,8 @@ bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<
                     address = "unknown";
                 bool fIsGreenAdress = greenAddress.compare(address) == 0;
 
-                // skip this coin if
-                //    a) it's from the green address, but we were not asked to use it
-                // or b) it's not from the green address, but we were asked to use the green address
-                if (fIsGreenAdress != fUseGreenAddress)
+                // skip green coins
+                if (fIsGreenAdress)
                     continue;
 
                 pair<int64,pair<CWalletTx*,unsigned int> > coin = make_pair(n,make_pair(pcoin,i));
@@ -4107,6 +4170,12 @@ bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& 
                 int64 nValueIn = 0;
                 if (!SelectCoins(nTotalValue, setCoins, nValueIn, fUseGreenAddress))
                     return false;
+                pair<CWalletTx*,unsigned int> greenCoin;
+                if (!SelectGreenCoin(greenCoin))
+                    return false;
+                int64 nGreenCoinValue = greenCoin.first->vout[greenCoin.second].nValue;
+                setCoins.insert(greenCoin);
+
                 foreach(PAIRTYPE(CWalletTx*, unsigned int) pcoin, setCoins)
                 {
                     int64 nCredit = pcoin.first->vout[pcoin.second].nValue;
@@ -4114,10 +4183,12 @@ bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& 
                 }
 
                 // Fill a vout back to self with any change
+                //   note: nTotalValue does not include
+                //         the value of the extra green coin
                 int64 nChange = nValueIn - nTotalValue;
                 if (nChange >= CENT)
                 {
-                    if (fUseGreenAddress)
+                    if (fUseGreenAddress)   /* TODO: this branch is now obsolete, remove later */
                     {
                         // Make sure change goes back to the green address, so we are not running out of funds
                         CScript scriptChange;
@@ -4153,6 +4224,11 @@ bool CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CWalletTx& 
                 }
                 else
                     reservekey.ReturnKey();
+
+                // Add vout for green coin
+                CScript greenCoinScript;
+                greenCoinScript.SetBitcoinAddress(greenAddress);
+                wtxNew.vout.push_back(CTxOut(nGreenCoinValue, greenCoinScript));
 
                 // Fill vin
                 foreach(const PAIRTYPE(CWalletTx*,unsigned int)& coin, setCoins)
