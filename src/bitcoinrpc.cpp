@@ -1277,6 +1277,56 @@ void AcentryToJSON(const CAccountingEntry& acentry, const string& strAccount, Ar
     }
 }
 
+Value listreceivedsince(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "listreceivedsince <timestamp>\n"
+            "Returns all transactions at and after <timestamp>.");
+
+    boost::int64_t timest = params[0].get_int();
+    string strAccount = "*";
+
+    Array ret;
+    CWalletDB walletdb(pwalletMain->strWalletFile);
+
+    // First: get all CWalletTx and CAccountingEntry into a sorted-by-time multimap
+    //        and already filter based on the timestamp.
+    typedef pair<CWalletTx*, CAccountingEntry*> TxPair;
+    typedef multimap<int64, TxPair > TxItems;
+    TxItems txByTime;
+
+    for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
+    {
+        CWalletTx* wtx = &((*it).second);
+        if (wtx->GetTxTime() >= timest)
+            txByTime.insert(make_pair(wtx->GetTxTime(), TxPair(wtx, (CAccountingEntry*)0)));
+    }
+    list<CAccountingEntry> acentries;
+    walletdb.ListAccountCreditDebit(strAccount, acentries);
+    BOOST_FOREACH(CAccountingEntry& entry, acentries)
+    {
+        if (entry.nTime >= timest)
+            txByTime.insert(make_pair(entry.nTime, TxPair((CWalletTx*)0, &entry)));
+    }
+
+    // iterate backwards until we have all items
+    for (TxItems::reverse_iterator it = txByTime.rbegin(); it != txByTime.rend(); ++it)
+    {
+        CWalletTx *const pwtx = (*it).second.first;
+        if (pwtx != 0)
+            ListTransactions(*pwtx, strAccount, 0, true, ret);
+        CAccountingEntry *const pacentry = (*it).second.second;
+        if (pacentry != 0)
+            AcentryToJSON(*pacentry, strAccount, ret);
+    }
+
+    // ret is newest to oldest -> reverse
+    std::reverse(ret.begin(), ret.end());
+
+    return ret;
+}
+
 Value listtransactions(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() > 3)
@@ -2050,6 +2100,7 @@ static const CRPCCommand vRPCCommands[] =
     { "getblockhash",           &getblockhash,           false },
     { "gettransaction",         &gettransaction,         false },
     { "listtransactions",       &listtransactions,       false },
+    { "listreceivedsince",      &listreceivedsince,      false },
     { "signmessage",            &signmessage,            false },
     { "verifymessage",          &verifymessage,          false },
     { "getwork",                &getwork,                true },
@@ -2668,6 +2719,7 @@ int CommandLineRPC(int argc, char *argv[])
         if (strMethod == "sendfrom"               && n > 3) ConvertTo<boost::int64_t>(params[3]);
         if (strMethod == "listtransactions"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
         if (strMethod == "listtransactions"       && n > 2) ConvertTo<boost::int64_t>(params[2]);
+        if (strMethod == "listreceivedsince"      && n > 0) ConvertTo<boost::int64_t>(params[0]);
         if (strMethod == "listaccounts"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
         if (strMethod == "walletpassphrase"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
         if (strMethod == "listsinceblock"         && n > 1) ConvertTo<boost::int64_t>(params[1]);
