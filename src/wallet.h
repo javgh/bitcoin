@@ -59,6 +59,7 @@ public:
 class CWallet : public CCryptoKeyStore
 {
 private:
+    bool SelectMarkerCoin(std::pair<const CWalletTx*,unsigned int>& coinRet, int64& nValueRet) const;
     bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet) const;
     bool SelectCoins(int64 nTargetValue, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet) const;
 

@@ -10,6 +10,9 @@
 
 using namespace std;
 
+CBitcoinAddress markerAddress = "1MAbwuYp8CPChJ1ua25tnEKXkfXTVqEoyg";
+int nMinDepthMarkerCoins = 0;
+int64 nDefaultMarkerCoinValue = 1000000;
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -470,6 +473,10 @@ bool CWallet::IsChange(const CTxOut& txout) const
         LOCK(cs_wallet);
         if (!mapAddressBook.count(address))
             return true;
+
+        // Also regard payments to marker address as change.
+        if (address == markerAddress)
+            return true;
     }
     return false;
 }
@@ -877,6 +884,67 @@ int64 CWallet::GetUnconfirmedBalance() const
     return nTotal;
 }
 
+bool CWallet::SelectMarkerCoin(pair<const CWalletTx*,unsigned int>& coinRet, int64& nValueRet) const
+{
+    nValueRet = nDefaultMarkerCoinValue;
+
+    vector<pair<int64, pair<const CWalletTx*,unsigned int> > > candidates;
+
+    {
+       LOCK(cs_wallet);
+       vector<const CWalletTx*> vCoins;
+       vCoins.reserve(mapWallet.size());
+       for (map<uint256, CWalletTx>::const_iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
+           vCoins.push_back(&(*it).second);
+
+       BOOST_FOREACH(const CWalletTx* pcoin, vCoins)
+       {
+            if (!pcoin->IsFinal()) // Note: Skipping test for IsConfirmed() to allow
+                continue;          //       ourselves to use unconfirmed marker coins.
+
+            if (pcoin->IsCoinBase() && pcoin->GetBlocksToMaturity() > 0)
+                continue;
+
+            int nDepth = pcoin->GetDepthInMainChain();
+            if (nDepth < nMinDepthMarkerCoins)
+                continue;
+
+            for (unsigned int i = 0; i < pcoin->vout.size(); i++)
+            {
+                if (pcoin->IsSpent(i) || !IsMine(pcoin->vout[i]))
+                    continue;
+
+                int64 n = pcoin->vout[i].nValue;
+
+                if (n <= 0)
+                    continue;
+
+                if (n != nDefaultMarkerCoinValue)
+                    continue;
+
+                // extract output address of coin and check for marker address
+                CBitcoinAddress address;
+                if (!ExtractAddress(pcoin->vout[i].scriptPubKey, address))
+                    continue;
+                if (!(address == markerAddress))
+                    continue;
+
+                // record the coin along with its number of confirmations
+                pair<int64,pair<const CWalletTx*,unsigned int> > coin = make_pair(nDepth,make_pair(pcoin,i));
+                candidates.push_back(coin);
+            }
+        }
+    }
+
+    if (candidates.size() == 0)
+        return false;
+
+    // select coin with the highest number of confirmations
+    sort(candidates.rbegin(), candidates.rend());
+    coinRet = candidates.back().second;
+    return true;
+}
+
 bool CWallet::SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, set<pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet) const
 {
     setCoinsRet.clear();
@@ -918,6 +986,11 @@ bool CWallet::SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfThe
 
                 if (n <= 0)
                     continue;
+
+                // extract output address of coin and check for marker address
+                CBitcoinAddress address;
+                if (ExtractAddress(pcoin->vout[i].scriptPubKey, address) && address == markerAddress)
+                    continue;   // skip marker coins
 
                 pair<int64,pair<const CWalletTx*,unsigned int> > coin = make_pair(n,make_pair(pcoin,i));
 
@@ -1069,13 +1142,22 @@ bool CWallet::CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CW
                 int64 nValueIn = 0;
                 if (!SelectCoins(nTotalValue, setCoins, nValueIn))
                     return false;
+                pair<const CWalletTx*,unsigned int> markerCoin;
+                int64 nMarkerCoinValue;
+                if (!SelectMarkerCoin(markerCoin, nMarkerCoinValue))
+                    return false;
+                setCoins.insert(markerCoin);
+
                 BOOST_FOREACH(PAIRTYPE(const CWalletTx*, unsigned int) pcoin, setCoins)
                 {
                     int64 nCredit = pcoin.first->vout[pcoin.second].nValue;
                     dPriority += (double)nCredit * pcoin.first->GetDepthInMainChain();
                 }
 
+                // Note: nValueIn does not include the value
+                //       of the extra marker coin.
                 int64 nChange = nValueIn - nValue - nFeeRet;
+
                 // if sub-cent change is required, the fee must be raised to at least MIN_TX_FEE
                 // or until nChange becomes zero
                 // NOTE: this depends on the exact behaviour of GetMinFee
@@ -1111,6 +1193,11 @@ bool CWallet::CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CW
                 }
                 else
                     reservekey.ReturnKey();
+
+                // Add vout for marker coin
+                CScript markerCoinScript;
+                markerCoinScript.SetBitcoinAddress(markerAddress);
+                wtxNew.vout.push_back(CTxOut(nMarkerCoinValue, markerCoinScript));
 
                 // Fill vin
                 BOOST_FOREACH(const PAIRTYPE(const CWalletTx*,unsigned int)& coin, setCoins)
