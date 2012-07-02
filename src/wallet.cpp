@@ -7,6 +7,7 @@
 #include "walletdb.h"
 #include "crypter.h"
 #include "ui_interface.h"
+#include "signal.h"
 
 using namespace std;
 
@@ -375,6 +376,20 @@ bool CWallet::AddToWallet(const CWalletTx& wtxIn)
 #endif
         // Notify UI
         vWalletUpdated.push_back(hash);
+
+        // Support tx notification
+        string strPidfile = mapArgs["-txnotify"];
+        if (strPidfile != "")
+        {
+            FILE *file = fopen(strPidfile.c_str(), "r");
+            if (file)
+            {
+                int nPid = 0;
+                if ((fscanf(file, "%d", &nPid) == 1) && (nPid > 1))
+                    kill((pid_t) nPid, SIGUSR2);
+                fclose(file);
+            }
+        }
 
         // since AddToWallet is called directly for self-originating transactions, check for consumption of own coins
         WalletUpdateSpent(wtx);
