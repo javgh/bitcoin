@@ -526,7 +526,7 @@ int CWalletTx::GetRequestCount() const
 }
 
 void CWalletTx::GetAmounts(int64& nGeneratedImmature, int64& nGeneratedMature, list<pair<CBitcoinAddress, int64> >& listReceived,
-                           list<pair<CBitcoinAddress, int64> >& listSent, int64& nFee, string& strSentAccount) const
+                           list<pair<CBitcoinAddress, int64> >& listSent, int64& nFee, string& strSentAccount, bool fFilterMarkerCoins) const
 {
     nGeneratedImmature = nGeneratedMature = nFee = 0;
     listReceived.clear();
@@ -564,6 +564,10 @@ void CWalletTx::GetAmounts(int64& nGeneratedImmature, int64& nGeneratedMature, l
 
         // Don't report 'change' txouts
         if (nDebit > 0 && pwallet->IsChange(txout))
+            continue;
+
+        // Don't count marker coins, if filter is active
+        if (fFilterMarkerCoins && address == markerAddress)
             continue;
 
         if (nDebit > 0)
