@@ -1221,6 +1221,42 @@ Value gettransaction(const Array& params, bool fHelp)
     return entry;
 }
 
+Value getorigins(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "getorigins <txid>\n"
+            "Show - if applicable - from which Bitcoin addresses the coins originated that were used to fund <txid>");
+
+    uint256 hash;
+    hash.SetHex(params[0].get_str());
+
+    Object entry;
+
+    if (!pwalletMain->mapWallet.count(hash))
+        throw JSONRPCError(-5, "Invalid or non-wallet transaction id");
+    const CWalletTx& wtx = pwalletMain->mapWallet[hash];
+
+    WalletTxToJSON(pwalletMain->mapWallet[hash], entry);
+
+    Array origins;
+    for (unsigned int i = 0; i < wtx.vin.size(); i++)
+    {
+        COutPoint outpoint = wtx.vin[i].prevout;
+        CTransaction txPrev;
+        uint256 hashBlock = 0;
+        if (GetTransaction(outpoint.hash, txPrev, hashBlock))
+        {
+            CTxDestination address;
+            if (ExtractDestination(txPrev.vout[outpoint.n].scriptPubKey, address))
+                origins.push_back(CBitcoinAddress(address).ToString());
+        }
+    }
+    entry.push_back(Pair("origins", origins));
+
+    return entry;
+}
+
 
 Value backupwallet(const Array& params, bool fHelp)
 {
