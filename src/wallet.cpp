@@ -12,7 +12,7 @@
 
 using namespace std;
 
-CBitcoinAddress greenAddress = "1GKuqfybxwHz6GSEZSHjN3HcELcMh2Kku6";
+CBitcoinAddress greenAddress = "1DvhfSxNWtsR7TQ6tKyC3GhTm3eJwQeEsu";
 int nMinDepthGreenCoins = 0;
 int64 nDefaultGreenCoinValue = 100000;
 
