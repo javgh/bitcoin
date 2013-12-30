@@ -12,6 +12,9 @@
 
 using namespace std;
 
+CBitcoinAddress greenAddress = "1GKuqfybxwHz6GSEZSHjN3HcELcMh2Kku6";
+int nMinDepthGreenCoins = 0;
+int64 nDefaultGreenCoinValue = 100000;
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -632,7 +635,8 @@ int CWalletTx::GetRequestCount() const
 }
 
 void CWalletTx::GetAmounts(list<pair<CTxDestination, int64> >& listReceived,
-                           list<pair<CTxDestination, int64> >& listSent, int64& nFee, string& strSentAccount) const
+                           list<pair<CTxDestination, int64> >& listSent, int64& nFee, string& strSentAccount,
+                           bool fFilterGreenCoins) const
 {
     nFee = 0;
     listReceived.clear();
@@ -660,6 +664,10 @@ void CWalletTx::GetAmounts(list<pair<CTxDestination, int64> >& listReceived,
 
         // Don't report 'change' txouts
         if (nDebit > 0 && pwallet->IsChange(txout))
+            continue;
+
+        // Don't count green coins, if filter is active
+        if (fFilterGreenCoins && CBitcoinAddress(address) == greenAddress)
             continue;
 
         if (nDebit > 0)
@@ -1030,7 +1038,8 @@ static void ApproximateBestSubset(vector<pair<int64, pair<const CWalletTx*,unsig
 }
 
 bool CWallet::SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, vector<COutput> vCoins,
-                                 set<pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet) const
+                                 set<pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet,
+                                 bool fGreenCoinOption) const
 {
     setCoinsRet.clear();
     nValueRet = 0;
@@ -1047,12 +1056,35 @@ bool CWallet::SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfThe
     BOOST_FOREACH(COutput output, vCoins)
     {
         const CWalletTx *pcoin = output.tx;
-
-        if (output.nDepth < (pcoin->IsFromMe() ? nConfMine : nConfTheirs))
-            continue;
-
         int i = output.i;
         int64 n = pcoin->vout[i].nValue;
+        CTxDestination dest;
+
+        bool fIsGreenCoin = ExtractDestination(pcoin->vout[i].scriptPubKey, dest)
+                                && CBitcoinAddress(dest) == greenAddress;
+
+        if (fGreenCoinOption)
+        {
+            // looking for green coins... we skip the nDepth check to
+            // allow the use of unconfirmed green coins and skip all
+            // normal coins
+            if (!fIsGreenCoin)
+                continue;
+
+            // we are also looking for a specific value
+            if (n != nDefaultGreenCoinValue)
+                continue;
+        }
+        else
+        {
+            if (output.nDepth < (pcoin->IsFromMe() ? nConfMine : nConfTheirs))
+                continue;
+
+            // looking for normal coins... filter out green ones
+            if (fIsGreenCoin)
+                continue;
+        }
+
 
         pair<int64,pair<const CWalletTx*,unsigned int> > coin = make_pair(n,make_pair(pcoin, i));
 
@@ -1128,14 +1160,15 @@ bool CWallet::SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfThe
     return true;
 }
 
-bool CWallet::SelectCoins(int64 nTargetValue, set<pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet) const
+bool CWallet::SelectCoins(int64 nTargetValue, set<pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet,
+                          bool fGreenCoinOption) const
 {
     vector<COutput> vCoins;
     AvailableCoins(vCoins);
 
-    return (SelectCoinsMinConf(nTargetValue, 1, 6, vCoins, setCoinsRet, nValueRet) ||
-            SelectCoinsMinConf(nTargetValue, 1, 1, vCoins, setCoinsRet, nValueRet) ||
-            SelectCoinsMinConf(nTargetValue, 0, 1, vCoins, setCoinsRet, nValueRet));
+    return (SelectCoinsMinConf(nTargetValue, 1, 6, vCoins, setCoinsRet, nValueRet, fGreenCoinOption) ||
+            SelectCoinsMinConf(nTargetValue, 1, 1, vCoins, setCoinsRet, nValueRet, fGreenCoinOption) ||
+            SelectCoinsMinConf(nTargetValue, 0, 1, vCoins, setCoinsRet, nValueRet, fGreenCoinOption));
 }
 
 
@@ -1194,6 +1227,19 @@ bool CWallet::CreateTransaction(const vector<pair<CScript, int64> >& vecSend,
                     strFailReason = _("Insufficient funds");
                     return false;
                 }
+
+                // Find at least one green coin
+                set<pair<const CWalletTx*,unsigned int> > setGreenCoins;
+                int64 nGreenValueIn = 0;
+                if (!SelectCoins(nDefaultGreenCoinValue, setGreenCoins,
+                                 nGreenValueIn, true))
+                {
+                    strFailReason = _("No suitable green coins");
+                    return false;
+                }
+                pair<const CWalletTx*,unsigned int> greenCoin = *setGreenCoins.begin();
+                setCoins.insert(greenCoin);
+
                 BOOST_FOREACH(PAIRTYPE(const CWalletTx*, unsigned int) pcoin, setCoins)
                 {
                     int64 nCredit = pcoin.first->vout[pcoin.second].nValue;
@@ -1203,7 +1249,10 @@ bool CWallet::CreateTransaction(const vector<pair<CScript, int64> >& vecSend,
                     dPriority += (double)nCredit * (pcoin.first->GetDepthInMainChain()+1);
                 }
 
+                // Note: nValueIn does not include the value
+                //       of the extra green coin
                 int64 nChange = nValueIn - nValue - nFeeRet;
+
                 // if sub-cent change is required, the fee must be raised to at least nMinTxFee
                 // or until nChange becomes zero
                 // NOTE: this depends on the exact behaviour of GetMinFee
@@ -1251,6 +1300,11 @@ bool CWallet::CreateTransaction(const vector<pair<CScript, int64> >& vecSend,
                 }
                 else
                     reservekey.ReturnKey();
+
+                // Add vout for green coin
+                CScript greenCoinScript;
+                greenCoinScript.SetDestination(greenAddress.Get());
+                wtxNew.vout.push_back(CTxOut(nDefaultGreenCoinValue, greenCoinScript));
 
                 // Fill vin
                 BOOST_FOREACH(const PAIRTYPE(const CWalletTx*,unsigned int)& coin, setCoins)
